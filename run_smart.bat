@@ -1,6 +1,13 @@
 @echo off
-chcp 65001 >nul
+chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
+
+REM Hata durumunda pencereyi açık tut
+if "%1"=="" (
+    cmd /k "%~f0 run"
+    exit /b
+)
+if "%1"=="run" shift
 
 REM IMAP Mail Transfer - SMART MODE (Windows)
 REM Otomatik cache yönetimi ve iş takibi
@@ -239,4 +246,4 @@ echo.
 echo Görüşmek üzere! 👋
 echo.
 timeout /t 2 >nul
-exit /b 0
+exit
