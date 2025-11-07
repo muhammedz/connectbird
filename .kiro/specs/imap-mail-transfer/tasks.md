@@ -1,0 +1,208 @@
+# Implementation Plan
+
+- [x] 1. Set up project structure and dependencies
+  - Create directory structure: imap_sync/ with main.py, imap_client.py, transfer.py, cache.py, config.py, utils.py
+  - Create requirements.txt with tqdm dependency
+  - Create README.md with usage instructions
+  - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5_
+
+- [x] 2. Implement custom exception classes
+  - Create exception hierarchy in utils.py: IMAPTransferError as base, IMAPConnectionError, IMAPFolderError, IMAPFetchError, IMAPAppendError, ConfigValidationError
+  - _Requirements: 5.1, 5.4_
+
+- [x] 3. Implement configuration management
+  - [x] 3.1 Create TransferConfig dataclass in config.py
+    - Define all configuration fields with type hints and default values
+    - Include source/dest credentials, folder, port, timeout, retry settings, file paths, max_message_size
+    - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5_
+  - [x] 3.2 Implement config validation
+    - Write validate_config() function to check required fields, validate port numbers, validate timeout values
+    - Raise ConfigValidationError for invalid configurations
+    - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5_
+  - [x] 3.3 Implement load_config_from_args()
+    - Parse argparse.Namespace and create TransferConfig instance
+    - Support environment variables for passwords (SOURCE_PASS, DEST_PASS)
+    - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5_
+
+- [x] 4. Implement cache manager with SQLite
+  - [x] 4.1 Create CacheManager class in cache.py
+    - Implement __init__() with db_path parameter
+    - Implement initialize() to create database and tables
+    - Create transferred_messages table with schema: source_uid, dest_uid, folder, transferred_at, message_size
+    - Create indexes on folder and transferred_at columns
+    - _Requirements: 2.4, 3.5_
+  - [x] 4.2 Implement duplicate detection methods
+    - Write is_transferred() to check if message already transferred using source_uid and folder
+    - Write get_transferred_uids() to retrieve all transferred UIDs for a folder
+    - Use parameterized queries to prevent SQL injection
+    - _Requirements: 2.1, 2.2, 3.3_
+  - [x] 4.3 Implement mark_transferred() method
+    - Insert new record with source_uid, dest_uid, folder, timestamp
+    - Commit immediately after insert for crash safety
+    - _Requirements: 2.3, 3.1_
+  - [x] 4.4 Implement statistics and cleanup methods
+    - Write get_statistics() to return transfer counts by folder
+    - Write close() to properly close database connection
+    - _Requirements: 2.3_
+
+- [x] 5. Implement IMAP client wrapper
+  - [x] 5.1 Create IMAPClient class in imap_client.py
+    - Implement __init__() with host, username, password, port parameters
+    - Store connection parameters as instance variables
+    - _Requirements: 1.1, 10.1, 10.2_
+  - [x] 5.2 Implement connection management
+    - Write connect() method using imaplib.IMAP4_SSL
+    - Implement SSL certificate validation
+    - Write disconnect() method to properly close connection
+    - Raise IMAPConnectionError on connection failures
+    - _Requirements: 1.1, 10.1, 10.2, 10.3, 10.4, 10.5_
+  - [x] 5.3 Implement folder operations
+    - Write select_folder() to select IMAP folder and return message count
+    - Write folder_exists() to check if folder exists
+    - Write create_folder() to create folder if it doesn't exist
+    - Raise IMAPFolderError on folder operation failures
+    - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5_
+  - [x] 5.4 Implement UID retrieval
+    - Write get_uid_list() to fetch all UIDs from selected folder using IMAP SEARCH command
+    - Return list of UID strings
+    - _Requirements: 1.2_
+  - [x] 5.5 Implement message fetch (streaming)
+    - Write fetch_message() to fetch single message by UID using IMAP FETCH command
+    - Extract message data (RFC822), date, and flags from IMAP response
+    - Return tuple: (message_data, date, flags)
+    - Raise IMAPFetchError on fetch failures
+    - _Requirements: 1.3, 6.1, 6.2, 6.5_
+  - [x] 5.6 Implement message append
+    - Write append_message() to append message to destination folder
+    - Include original date and flags in APPEND command
+    - Return new UID from destination server
+    - Raise IMAPAppendError on append failures
+    - _Requirements: 1.4, 6.3, 6.4_
+
+- [x] 6. Implement utility functions
+  - Write format_size() to convert bytes to human-readable format (KB, MB, GB)
+  - Write parse_imap_date() to normalize IMAP date strings
+  - Write sanitize_folder_name() to clean folder names
+  - Create RetryHandler class with execute() method for retry logic with exponential backoff
+  - _Requirements: 5.2_
+
+- [x] 7. Implement transfer engine
+  - [x] 7.1 Create TransferEngine class in transfer.py
+    - Implement __init__() with source_client, dest_client, cache_manager, logger parameters
+    - Store references to all dependencies
+    - _Requirements: 1.1, 1.2, 1.3, 1.4_
+  - [x] 7.2 Implement UID filtering logic
+    - Write _get_untransferred_uids() to compare source UIDs with cache
+    - Filter out already transferred messages
+    - Return list of UIDs that need transfer
+    - _Requirements: 2.1, 2.2, 3.2, 3.3_
+  - [x] 7.3 Implement single message transfer with streaming
+    - Write _transfer_single_message() to transfer one message
+    - Fetch message from source using source_client.fetch_message()
+    - Append message to destination using dest_client.append_message()
+    - Mark as transferred in cache using cache_manager.mark_transferred()
+    - Call _cleanup_message() to release memory
+    - Implement retry logic using RetryHandler for network errors (up to 3 retries)
+    - Skip messages exceeding max_message_size and log warning
+    - Return True on success, False on failure
+    - _Requirements: 1.3, 1.4, 2.3, 5.2, 5.3, 8.1_
+  - [x] 7.4 Implement memory cleanup
+    - Write _cleanup_message() to delete message variables and call gc.collect()
+    - Ensure memory is released after each message transfer
+    - _Requirements: 1.5, 8.1, 8.2, 8.3, 8.4, 8.5_
+  - [x] 7.5 Implement progress tracking
+    - Write _update_progress() using tqdm library
+    - Display current message number, total count, and percentage
+    - Update progress bar after each message transfer
+    - _Requirements: 4.1, 4.2, 4.3, 4.4_
+  - [x] 7.6 Implement main transfer loop
+    - Write transfer_folder() to orchestrate full folder transfer
+    - Get source UIDs, filter untransferred UIDs, iterate through UIDs
+    - Call _transfer_single_message() for each UID
+    - Track statistics: total, transferred, skipped, failed
+    - Handle errors gracefully and continue with next message
+    - Return TransferResult with statistics
+    - _Requirements: 1.2, 1.3, 1.4, 3.4, 4.5, 5.4_
+
+- [x] 8. Implement main controller and CLI
+  - [x] 8.1 Create argument parser in main.py
+    - Use argparse to define CLI arguments: --source-host, --source-user, --source-pass, --dest-host, --dest-user, --dest-pass, --folder
+    - Add optional arguments: --port, --timeout, --retry-count, --log-file, --cache-db
+    - Write parse_arguments() function
+    - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5_
+  - [x] 8.2 Implement logging setup
+    - Write setup_logging() to configure Python logging
+    - Set log format: [TIMESTAMP] [LEVEL] [COMPONENT] Message
+    - Configure file handler with specified log file
+    - Set appropriate log levels (INFO for console, DEBUG for file)
+    - _Requirements: 5.1, 5.5_
+  - [x] 8.3 Implement main orchestration flow
+    - Write main() function to coordinate all components
+    - Parse arguments and load configuration
+    - Setup logging
+    - Initialize CacheManager and create database
+    - Create source and destination IMAPClient instances
+    - Connect to both IMAP servers
+    - Verify source folder exists, create destination folder if needed
+    - Create TransferEngine and call transfer_folder()
+    - Display final statistics and completion message
+    - Handle exceptions and return appropriate exit codes
+    - Ensure proper cleanup (disconnect clients, close cache)
+    - _Requirements: 1.1, 3.1, 3.2, 9.1, 9.2, 9.5_
+  - [x] 8.4 Add signal handling for graceful shutdown
+    - Register signal handlers for SIGINT and SIGTERM
+    - Ensure cache is saved and connections closed on interrupt
+    - _Requirements: 3.1, 3.5_
+
+- [x] 9. Implement error handling and logging
+  - Add try-except blocks in all critical operations
+  - Log errors with appropriate levels (WARNING for retries, ERROR for failures)
+  - Include UID and error details in log messages
+  - Ensure errors don't crash the program, continue with next message
+  - Log final error summary at end of transfer
+  - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
+
+- [x] 10. Create documentation and usage examples
+  - Write comprehensive README.md with installation instructions, usage examples, configuration options
+  - Add example commands for common scenarios
+  - Document environment variable usage for passwords
+  - Include troubleshooting section
+  - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5_
+
+- [ ]* 11. Write unit tests
+  - [ ]* 11.1 Write tests for CacheManager
+    - Test database initialization, is_transferred(), mark_transferred(), get_transferred_uids()
+    - Use in-memory SQLite database for tests
+    - _Requirements: 2.1, 2.2, 2.3, 2.4_
+  - [ ]* 11.2 Write tests for IMAPClient
+    - Mock imaplib.IMAP4_SSL responses
+    - Test connect(), get_uid_list(), fetch_message(), append_message()
+    - Test error scenarios and exception raising
+    - _Requirements: 1.1, 1.2, 1.3, 1.4_
+  - [ ]* 11.3 Write tests for TransferEngine
+    - Mock IMAPClient and CacheManager
+    - Test _get_untransferred_uids(), _transfer_single_message(), transfer_folder()
+    - Test retry logic and error handling
+    - _Requirements: 1.3, 1.4, 2.1, 5.2_
+  - [ ]* 11.4 Write tests for config validation
+    - Test validate_config() with valid and invalid configurations
+    - Test load_config_from_args() with various argument combinations
+    - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5_
+
+- [ ]* 12. Create integration tests
+  - [ ]* 12.1 Write end-to-end transfer test
+    - Use mock IMAP servers or test accounts
+    - Transfer small set of test messages
+    - Verify all messages transferred correctly
+    - Verify metadata (date, flags) preserved
+    - _Requirements: 1.1, 1.2, 1.3, 1.4, 6.3, 6.4_
+  - [ ]* 12.2 Write resume functionality test
+    - Start transfer, interrupt mid-way, restart
+    - Verify transfer resumes from correct point
+    - Verify no duplicate transfers
+    - _Requirements: 3.1, 3.2, 3.3, 3.4_
+  - [ ]* 12.3 Write memory usage test
+    - Transfer large number of messages (1000+)
+    - Monitor RAM usage during transfer
+    - Verify memory stays under 200MB threshold
+    - _Requirements: 1.5, 8.1, 8.2, 8.3, 8.4, 8.5_
